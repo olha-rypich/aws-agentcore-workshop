@@ -1,9 +1,9 @@
 # Module 11: Google Docs RAG via AgentCore Gateway (USER_FEDERATION)
 
 ## What this module demonstrates
-- AgentCore Runtime app (`module11_agentcore_runtime_app.py`)
-- LangGraph retrieval workflow (`module11_google_docs_rag.py`)
-- Gateway MCP tool call (`module11_google_docs_gateway_adapter.py`)
+- AgentCore Runtime app (`archive/legacy-modules/module11_agentcore_runtime_app.py`)
+- LangGraph retrieval workflow (`archive/legacy-modules/module11_google_docs_rag.py`)
+- Gateway MCP tool call (`archive/legacy-modules/module11_google_docs_gateway_adapter.py`)
 - Google OAuth consent flow for outbound credentials (via Gateway credential provider)
 
 ## Target architecture
@@ -78,9 +78,9 @@ Export it:
 export GATEWAY_ID='workshop-gateway-xxxxxxxxxx'
 ```
 
-Create target using included helper:
+Create target using included helper (legacy module path):
 ```bash
-python /Users/cyrildubovik/Documents/Projects/aws-agentcore-workshop/module11_setup_google_docs_gateway_target.py
+python /Users/cyrildubovik/Documents/Projects/aws-agentcore-workshop/archive/legacy-modules/module11_setup_google_docs_gateway_target.py
 ```
 
 List targets:
@@ -106,18 +106,18 @@ export GOOGLE_DOCS_TOOL_NAME='<tool-name-from-tools-list>'
 
 Discover tool name:
 ```bash
-python /Users/cyrildubovik/Documents/Projects/aws-agentcore-workshop/module11_google_docs_gateway_adapter.py
+python /Users/cyrildubovik/Documents/Projects/aws-agentcore-workshop/archive/legacy-modules/module11_google_docs_gateway_adapter.py
 ```
 
 ---
 
 ## 6) Local run: Google Docs RAG module
 ```bash
-python /Users/cyrildubovik/Documents/Projects/aws-agentcore-workshop/module11_google_docs_rag.py
+python /Users/cyrildubovik/Documents/Projects/aws-agentcore-workshop/archive/legacy-modules/module11_google_docs_rag.py
 ```
 
 Set a real Google Doc ID in:
-- `/Users/cyrildubovik/Documents/Projects/aws-agentcore-workshop/module11_google_docs_rag.py`
+- `/Users/cyrildubovik/Documents/Projects/aws-agentcore-workshop/archive/legacy-modules/module11_google_docs_rag.py`
 
 If response contains authorization URL, open it, finish consent, then re-run same prompt.
 
@@ -126,7 +126,7 @@ If response contains authorization URL, open it, finish consent, then re-run sam
 ## 7) Deploy Runtime app for module 11
 Configure:
 ```bash
-agentcore configure --entrypoint module11_agentcore_runtime_app.py --region us-east-1
+agentcore configure --entrypoint archive/legacy-modules/module11_agentcore_runtime_app.py --region us-east-1
 ```
 
 Deploy with required env vars:

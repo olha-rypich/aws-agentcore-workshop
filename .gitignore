@@ -24,6 +24,7 @@ tmp/e2e_oauth_state.json
 .bedrock_agentcore.yaml
 tmp/
 tmpfile
+local/
 
 # Editor settings
 .vscode/
