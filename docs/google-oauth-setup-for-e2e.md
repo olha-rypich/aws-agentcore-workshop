@@ -1,10 +1,16 @@
-# Module 11: Google Docs RAG via AgentCore Gateway (USER_FEDERATION)
+# Google OAuth Setup for AgentCore E2E Workshop
 
-## What this module demonstrates
-- AgentCore Runtime app (`archive/legacy-modules/module11_agentcore_runtime_app.py`)
-- LangGraph retrieval workflow (`archive/legacy-modules/module11_google_docs_rag.py`)
-- Gateway MCP tool call (`archive/legacy-modules/module11_google_docs_gateway_adapter.py`)
-- Google OAuth consent flow for outbound credentials (via Gateway credential provider)
+## What this guide is for
+- setting up Google OAuth credentials for the current E2E workshop flow;
+- supplying `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` for the demo notebook and runtime;
+- understanding how Google Docs outbound OAuth fits into AgentCore Gateway.
+
+Current primary flow:
+- `output/jupyter-notebook/workshop_google_docs_rag_e2e_demo.ipynb`
+- `workshop_google_docs_rag_e2e.ipynb`
+- `runtime_app_agentcore_full.py`
+
+Legacy module 11 scripts still exist in `archive/legacy-modules/`, but they are archival and not the main presentation path.
 
 ## Target architecture
 1. Client invokes Runtime.
@@ -17,8 +23,9 @@
 
 ## 0) Prerequisites
 - Existing AWS profile and region (`us-east-1` in your workshop).
-- Existing Gateway (you already have `workshop-gateway`).
+- Existing E2E workshop repo with `.env`.
 - Google Cloud project with Google Docs API enabled.
+- A Google account that can open the target document.
 
 ---
 
@@ -172,8 +179,15 @@ agentcore gateway list-mcp-gateway-targets --name workshop-gateway --region us-e
 
 ---
 
-## 5) Prepare env for module 11 adapter
-Set existing gateway auth env vars (same pattern as Module 10), plus tool name.
+## 5) Legacy adapter setup (archive only)
+This section is kept only for the archived `module11_*` assets in `archive/legacy-modules/`.
+
+If you are using the current presentation flow, prefer:
+- `output/jupyter-notebook/workshop_google_docs_rag_e2e_demo.ipynb`
+- `workshop_helpers/`
+- `runtime_app_agentcore_full.py`
+
+Set existing gateway auth env vars, plus tool name.
 
 ```bash
 export GATEWAY_URL='https://<gateway-id>.gateway.bedrock-agentcore.us-east-1.amazonaws.com/mcp'
@@ -193,7 +207,7 @@ python /Users/cyrildubovik/Documents/Projects/aws-agentcore-workshop/archive/leg
 
 ---
 
-## 6) Local run: Google Docs RAG module
+## 6) Local run: legacy Google Docs RAG module (archive only)
 ```bash
 python /Users/cyrildubovik/Documents/Projects/aws-agentcore-workshop/archive/legacy-modules/module11_google_docs_rag.py
 ```
@@ -205,7 +219,7 @@ If response contains authorization URL, open it, finish consent, then re-run sam
 
 ---
 
-## 7) Deploy Runtime app for module 11
+## 7) Deploy legacy runtime app (archive only)
 Configure:
 ```bash
 agentcore configure --entrypoint archive/legacy-modules/module11_agentcore_runtime_app.py --region us-east-1
