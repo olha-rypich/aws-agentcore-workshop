@@ -132,6 +132,7 @@ class DemoHelperTests(unittest.TestCase):
             "mcp_version": "2025-11-25",
             "google_docs_tool_name": "tool-name",
         }
+        demo.health_gate = MagicMock()
         demo.get_user_access_token = MagicMock(side_effect=["token-1", "token-2"])
 
         first = MagicMock(status_code=401, text='{"message":"Token has expired"}')
@@ -151,6 +152,7 @@ class DemoHelperTests(unittest.TestCase):
         self.assertEqual(payload["status"], "healthy")
         self.assertEqual(demo.get_user_access_token.call_count, 2)
         self.assertEqual(post.call_count, 2)
+        demo.health_gate.assert_called_once_with()
 
     def test_complete_runtime_consent_uses_runtime_initiating_token(self) -> None:
         demo = self.make_demo()
@@ -182,6 +184,40 @@ class DemoHelperTests(unittest.TestCase):
         self.assertIn("Consent complete", response.text)
         self.assertEqual(callback["query"]["code"], ["ok"])
 
+    def test_callback_server_is_reused_across_demo_instances(self) -> None:
+        first_demo = self.make_demo()
+        self._demo = first_demo
+        first_info = first_demo.start_callback_server()
+
+        response = requests.get(
+            f"http://{first_info['host']}:{first_info['port']}{first_info['path']}?code=stale",
+            timeout=5,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            first_demo.wait_for_callback(timeout_sec=5)["query"]["code"],
+            ["stale"],
+        )
+
+        second_demo = self.make_demo()
+        second_demo.start_callback_server()
+
+        self.assertIs(first_demo._callback_server, second_demo._callback_server)
+        self.assertFalse(second_demo._callback_server.callback_event.is_set())
+        self.assertIsNone(second_demo._callback_server.last_request)
+
+        response = requests.get(
+            f"http://{first_info['host']}:{first_info['port']}{first_info['path']}?code=fresh",
+            timeout=5,
+        )
+        callback = second_demo.wait_for_callback(timeout_sec=5)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(callback["query"]["code"], ["fresh"])
+
+        second_demo.stop_callback_server()
+        self._demo = None
+
     def test_print_runtime_result_renders_assistant_response_sources_and_trace(self) -> None:
         demo = self.make_demo()
         self._demo = demo
@@ -210,6 +246,29 @@ class DemoHelperTests(unittest.TestCase):
         self.assertIn("https://docs.google.com/document/d/test/edit", output)
         self.assertIn("TOOL TRACE:", output)
         self.assertIn("step=1 event=tool_call tool=get_google_doc", output)
+
+    def test_run_runtime_demo_step_hides_version_assert_and_rendering(self) -> None:
+        demo = self.make_demo()
+        self._demo = demo
+        demo.invoke_runtime = MagicMock(return_value={"app_version": "2026-03-14-demo"})
+        demo.assert_runtime_version = MagicMock()
+        demo.print_runtime_result = MagicMock()
+
+        payload = demo.run_runtime_demo_step(
+            "FIRST INVOKE",
+            payload={"prompt": "Visible payload"},
+        )
+
+        self.assertEqual(payload["app_version"], "2026-03-14-demo")
+        demo.invoke_runtime.assert_called_once_with(
+            payload={"prompt": "Visible payload"},
+            prompt=None,
+            thread_id=None,
+            max_steps=5,
+            max_doc_calls=1,
+        )
+        demo.assert_runtime_version.assert_called_once_with(payload)
+        demo.print_runtime_result.assert_called_once_with("FIRST INVOKE", payload)
 
 
 if __name__ == "__main__":

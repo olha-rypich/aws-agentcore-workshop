@@ -439,6 +439,7 @@ class WorkshopE2EGatewayMixin:
     def smoke_test_gateway(self) -> dict[str, Any]:
         if "gateway" not in self.state:
             self.ensure_gateway_stack()
+        self.health_gate()
 
         def do_request(token: str):
             return requests.post(

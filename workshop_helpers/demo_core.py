@@ -76,6 +76,11 @@ CALLBACK_SUCCESS_HTML = """<!doctype html>
 </html>
 """
 
+_CALLBACK_SERVER_REGISTRY: dict[
+    tuple[str, int, str],
+    tuple[ThreadingHTTPServer, threading.Thread],
+] = {}
+
 
 class _CallbackHandler(BaseHTTPRequestHandler):
     server_version = "WorkshopCallback/1.0"
@@ -201,23 +206,62 @@ class WorkshopE2EDemoBase:
         path = parsed.path or "/"
         return host, port, path
 
-    def start_callback_server(self) -> dict[str, Any]:
-        if self._callback_server is not None:
-            host, port, path = self._callback_endpoint()
-            return {
-                "url": self.oauth_return_url,
-                "host": host,
-                "port": port,
-                "path": path,
-                "status": "running",
-            }
+    def _callback_server_info(
+        self,
+        host: str,
+        port: int,
+        path: str,
+        *,
+        status: str = "running",
+    ) -> dict[str, Any]:
+        return {
+            "url": self.oauth_return_url,
+            "host": host,
+            "port": port,
+            "path": path,
+            "status": status,
+        }
 
+    def _reset_callback_server_state(self, server: ThreadingHTTPServer) -> None:
+        server.callback_event.clear()
+        server.last_request = None
+
+    def start_callback_server(self) -> dict[str, Any]:
         host, port, path = self._callback_endpoint()
+        endpoint = (host, port, path)
+
+        existing = _CALLBACK_SERVER_REGISTRY.get(endpoint)
+        if existing:
+            server, thread = existing
+            if thread.is_alive():
+                self._reset_callback_server_state(server)
+                self._callback_server = server
+                self._callback_thread = thread
+                self.state["callback_server"] = self._callback_server_info(
+                    host, port, path
+                )
+                return dict(self.state["callback_server"])
+            _CALLBACK_SERVER_REGISTRY.pop(endpoint, None)
+
+        if self._callback_server is not None:
+            self._reset_callback_server_state(self._callback_server)
+            self.state["callback_server"] = self._callback_server_info(host, port, path)
+            return dict(self.state["callback_server"])
 
         class CallbackServer(ThreadingHTTPServer):
             allow_reuse_address = True
 
-        server = CallbackServer((host, port), _CallbackHandler)
+        try:
+            server = CallbackServer((host, port), _CallbackHandler)
+        except OSError as exc:
+            if exc.errno == 48:
+                raise RuntimeError(
+                    f"Callback port {host}:{port} is already in use. "
+                    "If this is a stale notebook callback server, rerun the cell after "
+                    "calling `demo.stop_callback_server()` on the old demo instance or "
+                    "restart the kernel."
+                ) from exc
+            raise
         server.callback_event = threading.Event()
         server.last_request = None
         thread = threading.Thread(
@@ -229,22 +273,20 @@ class WorkshopE2EDemoBase:
 
         self._callback_server = server
         self._callback_thread = thread
-        self.state["callback_server"] = {
-            "url": self.oauth_return_url,
-            "host": host,
-            "port": port,
-            "path": path,
-            "status": "running",
-        }
+        _CALLBACK_SERVER_REGISTRY[endpoint] = (server, thread)
+        self.state["callback_server"] = self._callback_server_info(host, port, path)
         return dict(self.state["callback_server"])
 
     def stop_callback_server(self) -> None:
         if self._callback_server is None:
             return
+        host, port, path = self._callback_endpoint()
+        endpoint = (host, port, path)
         self._callback_server.shutdown()
         self._callback_server.server_close()
         if self._callback_thread is not None:
             self._callback_thread.join(timeout=2)
+        _CALLBACK_SERVER_REGISTRY.pop(endpoint, None)
         self._callback_server = None
         self._callback_thread = None
         self.state["callback_server"] = {

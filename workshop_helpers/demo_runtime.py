@@ -393,6 +393,27 @@ class WorkshopE2ERuntimeMixin:
         )
         return self.invoke_runtime(payload=next_payload)
 
+    def run_runtime_demo_step(
+        self,
+        label: str,
+        *,
+        payload: dict[str, Any] | None = None,
+        prompt: str | None = None,
+        thread_id: str | None = None,
+        max_steps: int = 5,
+        max_doc_calls: int = 1,
+    ) -> dict[str, Any]:
+        result = self.invoke_runtime(
+            payload=payload,
+            prompt=prompt,
+            thread_id=thread_id,
+            max_steps=max_steps,
+            max_doc_calls=max_doc_calls,
+        )
+        self.assert_runtime_version(result)
+        self.print_runtime_result(label, result)
+        return result
+
     def print_runtime_result(self, label: str, payload: dict[str, Any]) -> None:
         print(f"\n=== {label} ===")
         answer = payload.get("answer") or {}
