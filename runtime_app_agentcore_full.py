@@ -1,3 +1,4 @@
+# DEPLOY_MARKER=1776337911
 import json
 import os
 import re
@@ -76,7 +77,7 @@ def get_settings() -> dict[str, Any]:
             "GOOGLE_DOCS_TOOL_NAME": os.environ["GOOGLE_DOCS_TOOL_NAME"],
             "MCP_VERSION": os.environ.get("GATEWAY_MCP_VERSION", "2025-11-25"),
             "AWS_REGION": os.environ.get("AWS_REGION", "us-east-1"),
-            "GOOGLE_MODEL_ID": os.environ.get("GOOGLE_MODEL_ID", "gemini-3-flash-preview"),
+            "GOOGLE_MODEL_ID": os.environ.get("GOOGLE_MODEL_ID", "gemini-2.5-flash"),
             "GOOGLE_API_KEY": google_api_key,
             "DOC_CONTEXT_MAX_CHARS": int(os.environ.get("DOC_CONTEXT_MAX_CHARS", "12000")),
             "GOOGLE_MAX_OUTPUT_TOKENS": int(os.environ.get("GOOGLE_MAX_OUTPUT_TOKENS", "512")),
@@ -104,13 +105,13 @@ def mcp_request(
     headers = {
         "Authorization": f"Bearer {bearer_token}",
         "Content-Type": "application/json",
-        "MCP-Protocol-Version": settings["MCP_VERSION"],
+        "MCP-Protocol-Version": os.environ.get("GATEWAY_MCP_VERSION", "2025-11-25"),
     }
     if mcp_session_id and not mcp_session_id.startswith("urn:ietf:params:oauth:request_uri:"):
         headers["x-mcp-session-id"] = mcp_session_id
 
     response = requests.post(
-        settings["GATEWAY_URL"],
+        os.environ["GATEWAY_URL"],
         headers=headers,
         json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params},
         timeout=60,
@@ -412,129 +413,120 @@ def render_structured_answer(answer: dict[str, Any]) -> str:
     return body
 
 
-def get_google_doc() -> str:
-    settings = get_settings()
+def get_google_doc(query: str = "") -> str:
+    """Fetch Google Doc via Gateway MCP (OAuth handled by Gateway)."""
+    # Local settings fallback
+    settings = {
+        "GATEWAY_URL": os.environ.get("GATEWAY_URL", ""),
+        "GOOGLE_DOCS_TOOL_NAME": os.environ.get("GOOGLE_DOCS_TOOL_NAME", ""),
+        "MCP_VERSION": os.environ.get("GATEWAY_MCP_VERSION", "2025-11-25"),
+        "DOC_CONTEXT_MAX_CHARS": os.environ.get("DOC_CONTEXT_MAX_CHARS", "12000"),
+        "GOOGLE_PROVIDER_NAME": os.environ.get("GOOGLE_PROVIDER_NAME", "acwslite_google_provider"),
+        "AWS_REGION": os.environ.get("AWS_REGION", "us-east-1"),
+    }
     doc_id = AGENT_CTX.get("doc_id", "")
-    token = AGENT_CTX.get("access_token", "")
-    oauth_session_uri = AGENT_CTX.get("oauth_session_uri", "")
-    mcp_session_id = AGENT_CTX.get("mcp_session_id", "")
-    consent_pending = AGENT_CTX.get("consent_pending", "0") == "1"
-    oauth_return_url = str(AGENT_CTX.get("oauth_return_url", "")).strip()
-    force_authentication = AGENT_CTX.get("force_authentication", "0") == "1"
+    user_token = AGENT_CTX.get("access_token", "")
     max_doc_calls = int(AGENT_CTX.get("max_doc_calls", 1))
     doc_call_count = int(AGENT_CTX.get("doc_call_count", 0))
     cached = str(AGENT_CTX.get("doc_cached_result", ""))
 
     if not doc_id:
         return "ERROR: doc_id is empty in agent context."
-    if not token:
-        return "ERROR: user_access_token is empty in agent context."
+    if not user_token:
+        return "ERROR: user_access_token is missing in agent context."
+    if doc_call_count >= max_doc_calls and cached:
+        return cached
 
-    if consent_pending:
-        auth_url = AGENT_CTX.get("last_authorization_url", "")
-        req_uri = AGENT_CTX.get("last_oauth_session_uri", "")
-        return (
-            "CONSENT_REQUIRED\n"
-            f"authorization_url: {auth_url}\n"
-            f"oauth_session_uri: {req_uri}"
-        )
-
-    if doc_call_count >= max_doc_calls:
-        if cached:
-            return cached
-        return f"ERROR: get_google_doc call budget reached ({max_doc_calls})."
-
-    if oauth_session_uri:
-        try:
-            complete_oauth_session(token, oauth_session_uri)
-            AGENT_CTX["consent_pending"] = "0"
-        except ClientError as exc:
-            code = exc.response.get("Error", {}).get("Code", "Unknown")
-            msg = exc.response.get("Error", {}).get("Message", str(exc))
-            return (
-                "ERROR: complete_resource_token_auth failed.\n"
-                f"code: {code}\n"
-                f"message: {msg}"
-            )
-
-    params: dict[str, Any] = {
-        "name": settings["GOOGLE_DOCS_TOOL_NAME"],
-        "arguments": {"documentId": doc_id},
-    }
-    meta_cfg: dict[str, Any] = {}
-    if oauth_return_url:
-        meta_cfg["returnUrl"] = oauth_return_url
-    if force_authentication:
-        meta_cfg["forceAuthentication"] = True
-    # Always request USER_FEDERATION metadata for OAuth targets.
-    # If returnUrl is omitted, Gateway uses target defaultReturnUrl.
-    params["_meta"] = {
-        "aws.bedrock-agentcore.gateway/credentialProviderConfiguration": {
-            "oauthCredentialProvider": meta_cfg
-        }
-    }
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
 
     try:
-        payload = mcp_request(
-            token,
-            "tools/call",
-            params,
-            mcp_session_id=mcp_session_id,
-        )
-    except requests.HTTPError as exc:
-        status = getattr(exc.response, "status_code", "unknown")
-        body = (getattr(exc.response, "text", "") or "")[:800]
-        return (
-            "ERROR: MCP HTTP failure while calling Google Docs tool.\n"
-            f"status: {status}\n"
-            f"body: {body}"
-        )
-    except requests.RequestException as exc:
-        return f"ERROR: MCP network failure while calling Google Docs tool: {exc}"
-    AGENT_CTX["doc_call_count"] = doc_call_count + 1
+        gateway_url = os.environ["GATEWAY_URL"]
+        tool_name = os.environ["GOOGLE_DOCS_TOOL_NAME"]
+        mcp_version = os.environ.get("GATEWAY_MCP_VERSION", "2025-11-25")
 
-    if "error" in payload and payload["error"].get("code") == -32042:
-        auth_url = extract_elicitation_url(payload) or ""
-        req_uri = extract_request_uri_from_url(auth_url) or ""
-        AGENT_CTX["consent_pending"] = "1"
-        AGENT_CTX["last_authorization_url"] = auth_url
-        AGENT_CTX["last_oauth_session_uri"] = req_uri
-        return (
-            "CONSENT_REQUIRED\n"
-            f"authorization_url: {auth_url}\n"
-            f"oauth_session_uri: {req_uri}"
-        )
+        headers = {
+            "Authorization": f"Bearer {user_token}",
+            "Content-Type": "application/json",
+            "MCP-Protocol-Version": mcp_version,
+        }
 
-    if "error" in payload:
-        return f"ERROR: MCP get_google_doc failed: {payload['error']}"
+        _log.warning(f"DEBUG: Gateway MCP call, doc_id={doc_id[:8]}..., gateway={gateway_url[:50]}")
 
-    raw_text = extract_mcp_text(payload)
-    if bool((payload.get("result") or {}).get("isError")):
-        return (
-            "ERROR: MCP get_google_doc returned isError=true.\n"
-            f"message: {raw_text[:800]}"
-        )
+        # Step 1: MCP initialize (declares elicitation support)
+        init_resp = requests.post(gateway_url, headers=headers, json={
+            "jsonrpc": "2.0", "id": 0, "method": "initialize",
+            "params": {
+                "protocolVersion": mcp_version,
+                "capabilities": {"elicitation": {}},
+                "clientInfo": {"name": "runtime-agent", "version": "1.0.0"},
+            },
+        }, timeout=(10, 60))
 
-    doc_payload = parse_google_doc_payload(payload)
-    if not doc_payload:
-        return (
-            "ERROR: Could not parse Google Docs tool response.\n"
-            f"raw: {raw_text[:800]}"
-        )
+        session_id = init_resp.headers.get("Mcp-Session-Id", "")
+        if session_id:
+            headers["Mcp-Session-Id"] = session_id
 
-    doc_text = extract_google_doc_text(doc_payload)
-    source_url = f"https://docs.google.com/document/d/{doc_id}/edit"
+        # Step 2: tools/call for getDocument
+        call_resp = requests.post(gateway_url, headers=headers, json={
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {
+                "name": tool_name,
+                "arguments": {"documentId": doc_id},
+            },
+        }, timeout=(10, 120))
+        call_json = call_resp.json()
 
-    if not doc_text:
-        result_text = f"EMPTY_DOCUMENT\nSOURCE: {source_url}"
+        # Handle OAuth elicitation (-32042)
+        mcp_error = call_json.get("error")
+        if isinstance(mcp_error, dict) and mcp_error.get("code") == -32042:
+            elicitations = (mcp_error.get("data") or {}).get("elicitations") or []
+            auth_url = elicitations[0].get("url", "") if elicitations else ""
+            _log.warning(f"DEBUG: OAuth elicitation, url={auth_url[:80]}")
+            AGENT_CTX["consent_pending"] = "1"
+            AGENT_CTX["last_authorization_url"] = auth_url
+            req_uri = extract_request_uri_from_url(auth_url) or ""
+            AGENT_CTX["last_oauth_session_uri"] = req_uri
+            return (
+                f"CONSENT_REQUIRED\n"
+                f"authorization_url: {auth_url}\n"
+                f"oauth_session_uri: {req_uri}"
+            )
+
+        # Handle tool error
+        result = call_json.get("result", {})
+        if result.get("isError"):
+            err_text = ""
+            for block in result.get("content", []):
+                if isinstance(block, dict):
+                    err_text += block.get("text", "")
+            _log.warning(f"DEBUG: Gateway tool error: {err_text[:200]}")
+            return f"ERROR: Gateway returned: {err_text}"
+
+        # Success — extract document text
+        raw_text = ""
+        for block in result.get("content", []):
+            if isinstance(block, dict) and block.get("type") == "text":
+                raw_text += block.get("text", "")
+
+        try:
+            doc_json = json.loads(raw_text)
+            doc_plain = extract_google_doc_text(doc_json)
+        except Exception:
+            doc_plain = raw_text
+
+        source_url = f"https://docs.google.com/document/d/{doc_id}/edit"
+        result_text = f"DOCUMENT_TEXT:\n{doc_plain}\n\nSOURCE: {source_url}"
+
+        AGENT_CTX["doc_call_count"] = str(doc_call_count + 1)
         AGENT_CTX["doc_cached_result"] = result_text
+        _log.warning(f"DEBUG: Got doc via Gateway, plain_len={len(doc_plain)}")
+
         return result_text
 
-    result_text = f"DOCUMENT_TEXT:\n{doc_text}\n\nSOURCE: {source_url}"
-    AGENT_CTX["doc_cached_result"] = result_text
-    return result_text
-
-
+    except Exception as exc:
+        _log.warning(f"DEBUG: get_google_doc EXCEPTION: {type(exc).__name__}: {exc}")
+        return f"ERROR: get_google_doc failed: {type(exc).__name__}: {exc}"
 def _session_from_context(context: Any) -> str:
     if context is None:
         return ""
@@ -572,6 +564,7 @@ def invoke(payload: dict, context=None):
     recursion_limit = max(2, min(8, max_steps))
 
     tool_text = get_google_doc()
+    import logging as _log2; _log2.getLogger(__name__).warning(f"RAW_TOOL_TEXT_FIRST80: {repr(tool_text[:80])}")
     parsed = parse_tool_output(tool_text)
 
     trace = [
